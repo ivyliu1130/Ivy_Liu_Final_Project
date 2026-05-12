@@ -1,0 +1,107 @@
+library(dplyr)
+
+# Read the semicolon-separated CSV file
+Data_raw <- read.csv2("Data_filtered_osf_final.csv", header = TRUE)
+
+# Keep only participants in Condition 3, the self-monitoring only group
+Data_cond3 <- Data_raw %>%
+  filter(Condition == 3)
+
+# Check how many rows and participants remain
+nrow(Data_cond3)
+length(unique(Data_cond3$accountId))
+
+# Sum the EMA RNT items within each participant at each EMA time point
+# This creates one total EMA RNT score per person per time point
+EMA_clean <- Data_cond3 %>%
+  group_by(accountId, timePoint) %>%
+  summarise(
+    EMA_RNT_sum = sum(as.numeric(data), na.rm = FALSE),
+    answerDaysSinceAccountCreation = first(answerDaysSinceAccountCreation),
+    answerRate = first(answerRate),
+    .groups = "drop"
+  )
+
+# Create person-level EMA summary variables
+# Each row in the resulting dataset represents one participant
+EMA_person <- EMA_clean %>%
+  group_by(accountId) %>%
+  summarise(
+    # Average EMA RNT across all completed EMA time points
+    EMA_RNT_av = mean(EMA_RNT_sum, na.rm = TRUE),
+    # Standard deviation of EMA RNT across time points
+    # Higher values indicate greater variability in RNT
+    RNT_SD = sd(EMA_RNT_sum, na.rm = TRUE),
+    # Number of completed EMA observations per participant
+    n_EMA_completed = sum(!is.na(EMA_RNT_sum)),
+    # Participant's overall EMA completion rate
+    answerRate = first(answerRate),
+    .groups = "drop"
+  )
+
+# Keep baseline questionnaire variables
+# Each row in this dataset represents one participant
+Baseline_person <- Data_cond3 %>%
+  select(
+    accountId,
+    # Trait repetitive negative thinking measures
+    rrs_total_0,   # RRS-B: trait rumination/brooding
+    pswq_total_0,  # PSWQ-A: trait worry
+    # Baseline symptom variables
+    phq_total_0,   # PHQ-9: depressive symptoms
+    gad_total_0    # GAD-7: anxiety symptoms
+  ) %>%
+  distinct()
+
+# Merge baseline questionnaire variables with person-level EMA variables
+# The resulting dataset contains one row per participant
+Project_data <- Baseline_person %>%
+  left_join(EMA_person, by = "accountId")
+
+# Examine correlations among trait RNT measures,
+# EMA indices, and symptom variables
+cor_matrix <- cor(
+  Project_data[, c(
+    "rrs_total_0",
+    "pswq_total_0",
+    "EMA_RNT_av",
+    "RNT_SD",
+    "phq_total_0",
+    "gad_total_0"
+  )],
+  use = "pairwise.complete.obs"
+)
+# Display the correlation matrix
+cor_matrix
+
+# Test whether trait rumination and worry are associated with average EMA repetitive negative thinking
+lm_ema_av <- lm(
+  EMA_RNT_av ~ rrs_total_0 + pswq_total_0,
+  data = Project_data
+)
+# Display regression results
+summary(lm_ema_av)
+
+# Test whether trait rumination and worry are associated with variability in EMA repetitive negative thinking
+lm_ema_sd <- lm(
+  RNT_SD ~ rrs_total_0 + pswq_total_0,
+  data = Project_data
+)
+# Display regression results
+summary(lm_ema_sd)
+
+# Test whether EMA RNT indices are associated with baseline depressive symptoms
+lm_dep <- lm(
+  phq_total_0 ~ EMA_RNT_av + RNT_SD,
+  data = Project_data
+)
+# Display regression results
+summary(lm_dep)
+
+# Test whether EMA RNT indices are associated with baseline anxiety symptoms
+lm_anx <- lm(
+  gad_total_0 ~ EMA_RNT_av + RNT_SD,
+  data = Project_data
+)
+# Display regression results
+summary(lm_anx)
